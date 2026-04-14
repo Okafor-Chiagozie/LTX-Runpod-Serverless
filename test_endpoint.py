@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_KEY = os.environ.get("RUNPOD_API_KEY")
-ENDPOINT_ID = "swrgif95vdcviz"
+ENDPOINT_ID = "31wfpqxutli7sm"
 
 BASE_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}"
 HEADERS = {
@@ -18,12 +18,12 @@ HEADERS = {
 
 payload = {
     "input": {
-        "prompt": "A cat walking through a sunny garden with flowers, cinematic lighting, high quality",
+        "prompt": "A woman with long brown hair smiles warmly in golden sunset light, close-up portrait, cinematic",
         "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
-        "num_frames": 161,
+        "num_frames": 49,
         "fps": 24,
-        "width": 1024,
-        "height": 576,
+        "width": 768,
+        "height": 512,
         "num_inference_steps": 50,
         "decode_timestep": 0.03,
         "decode_noise_scale": 0.025,
@@ -33,6 +33,7 @@ payload = {
 print("Submitting job...")
 resp = requests.post(f"{BASE_URL}/run", json=payload, headers=HEADERS)
 job = resp.json()
+print(f"Response: {job}")
 job_id = job["id"]
 print(f"Job ID: {job_id}")
 
