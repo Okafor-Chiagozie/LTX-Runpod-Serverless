@@ -12,10 +12,11 @@ print("Loading LTX Video 0.9.8 distilled pipeline...")
 from diffusers import LTXPipeline, LTXImageToVideoPipeline
 from diffusers.utils import export_to_video
 
-MODEL_PATH = "/runpod-volume/ltx-model"
+MODEL_ID = "Lightricks/LTX-Video"
 
+print("Downloading/loading 2B model...")
 txt2vid_pipe = LTXPipeline.from_pretrained(
-    MODEL_PATH,
+    MODEL_ID,
     torch_dtype=torch.bfloat16,
 )
 txt2vid_pipe.enable_sequential_cpu_offload()
@@ -47,10 +48,10 @@ def handler(job):
 
         prompt          = inputs.get("prompt", "")
         negative_prompt = inputs.get("negative_prompt", "worst quality, inconsistent motion, blurry, jittery, distorted")
-        num_frames      = inputs.get("num_frames", 161)
+        num_frames      = inputs.get("num_frames", 49)
         fps             = inputs.get("fps", 24)
-        width           = inputs.get("width", 1024)
-        height          = inputs.get("height", 576)
+        width           = inputs.get("width", 768)
+        height          = inputs.get("height", 512)
         num_steps       = inputs.get("num_inference_steps", 50)
         guidance_scale  = inputs.get("guidance_scale", 3.0)
         decode_timestep = inputs.get("decode_timestep", 0.03)
