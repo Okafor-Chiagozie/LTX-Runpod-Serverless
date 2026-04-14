@@ -1,0 +1,8 @@
+*.mp4
+*.png
+__pycache__/
+*.pyc
+ltx-model/
+output.*
+frame_*.png
+.env

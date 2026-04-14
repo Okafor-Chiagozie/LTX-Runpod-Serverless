@@ -2,8 +2,12 @@ import requests
 import base64
 import time
 import sys
+import os
+from dotenv import load_dotenv
 
-API_KEY = "rpa_MI796DRR6PYBNINKYMJUFDMTG7LPR6BV5EN6RRLYyo6ah9"
+load_dotenv()
+
+API_KEY = os.environ.get("RUNPOD_API_KEY")
 ENDPOINT_ID = "swrgif95vdcviz"
 
 BASE_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}"
