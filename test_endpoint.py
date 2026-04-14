@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_KEY = os.environ.get("RUNPOD_API_KEY")
-ENDPOINT_ID = "31wfpqxutli7sm"
+ENDPOINT_ID = "bb5uma2ue2kavt"
 
 BASE_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}"
 HEADERS = {
@@ -16,17 +16,24 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Load image as base64
+import base64 as b64module
+with open("scene_08.png", "rb") as img_file:
+    image_b64 = b64module.b64encode(img_file.read()).decode("utf-8")
+
 payload = {
     "input": {
-        "prompt": "A woman with long brown hair smiles warmly in golden sunset light, close-up portrait, cinematic",
+        "image": image_b64,
+        "prompt": "Smoke billows upward, flames crackling, a distant siren wailing. Camera drifts across the scene, capturing the chaotic aftermath.",
         "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
-        "num_frames": 49,
+        "num_frames": 121,
         "fps": 24,
-        "width": 768,
-        "height": 512,
+        "width": 1280,
+        "height": 736,
         "num_inference_steps": 50,
-        "decode_timestep": 0.03,
-        "decode_noise_scale": 0.025,
+        "guidance_scale": 3.5,
+        "upscale": True,
+        "denoise_strength": 0.5,
     }
 }
 
