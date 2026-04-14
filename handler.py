@@ -1,5 +1,6 @@
 import runpod
 import torch
+import numpy as np
 import base64
 import tempfile
 import os
@@ -7,28 +8,31 @@ import requests
 from io import BytesIO
 from PIL import Image
 
-print("Loading LTX Video 13B 0.9.8 pipeline...")
+print("Loading Wan2.1 14B pipeline...")
 
-from diffusers import LTXConditionPipeline, LTXLatentUpsamplePipeline
-from diffusers.pipelines.ltx.pipeline_ltx_condition import LTXVideoCondition
-from diffusers.utils import export_to_video, load_video
+from diffusers import AutoencoderKLWan, WanPipeline, WanImageToVideoPipeline
+from diffusers.utils import export_to_video
+from transformers import CLIPVisionModel
 
-MODEL_ID = "Lightricks/LTX-Video-0.9.8-13B-distilled"
-UPSCALER_ID = "Lightricks/ltxv-spatial-upscaler-0.9.7"
+T2V_MODEL = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+I2V_MODEL = "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
 
-print("Downloading/loading 13B model...")
-pipe = LTXConditionPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
-pipe_upsample = LTXLatentUpsamplePipeline.from_pretrained(UPSCALER_ID, vae=pipe.vae, torch_dtype=torch.bfloat16)
-pipe.to("cuda")
-pipe_upsample.to("cuda")
-pipe.vae.enable_tiling()
-print("13B pipeline loaded and ready.")
+# Load text-to-video pipeline
+print("Loading text-to-video pipeline...")
+t2v_vae = AutoencoderKLWan.from_pretrained(T2V_MODEL, subfolder="vae", torch_dtype=torch.float32)
+t2v_pipe = WanPipeline.from_pretrained(T2V_MODEL, vae=t2v_vae, torch_dtype=torch.bfloat16)
+t2v_pipe.to("cuda")
 
+# Load image-to-video pipeline
+print("Loading image-to-video pipeline...")
+i2v_image_encoder = CLIPVisionModel.from_pretrained(I2V_MODEL, subfolder="image_encoder", torch_dtype=torch.float32)
+i2v_vae = AutoencoderKLWan.from_pretrained(I2V_MODEL, subfolder="vae", torch_dtype=torch.float32)
+i2v_pipe = WanImageToVideoPipeline.from_pretrained(I2V_MODEL, vae=i2v_vae, image_encoder=i2v_image_encoder, torch_dtype=torch.bfloat16)
+i2v_pipe.to("cuda")
 
-def round_to_nearest_resolution(height, width):
-    height = height - (height % pipe.vae_spatial_compression_ratio)
-    width = width - (width % pipe.vae_spatial_compression_ratio)
-    return height, width
+print("Wan2.1 pipelines loaded and ready.")
+
+DEFAULT_NEGATIVE = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
 
 
 def load_image_from_input(image_input):
@@ -52,100 +56,60 @@ def handler(job):
         inputs = job["input"]
 
         prompt          = inputs.get("prompt", "")
-        negative_prompt = inputs.get("negative_prompt", "worst quality, inconsistent motion, blurry, jittery, distorted")
-        num_frames      = inputs.get("num_frames", 97)
-        fps             = inputs.get("fps", 24)
+        negative_prompt = inputs.get("negative_prompt", DEFAULT_NEGATIVE)
+        num_frames      = inputs.get("num_frames", 81)
+        fps             = inputs.get("fps", 16)
         width           = inputs.get("width", 832)
         height          = inputs.get("height", 480)
         num_steps       = inputs.get("num_inference_steps", 30)
         guidance_scale  = inputs.get("guidance_scale", 5.0)
         seed            = inputs.get("seed", -1)
-        upscale         = inputs.get("upscale", True)
-        denoise_strength = inputs.get("denoise_strength", 0.4)
 
         generator = None if seed == -1 else torch.Generator("cuda").manual_seed(seed)
 
         image_input = inputs.get("image")
-        conditions = []
 
         if image_input:
             image = load_image_from_input(image_input)
-            video_cond = load_video(export_to_video([image]))
-            conditions = [LTXVideoCondition(video=video_cond, frame_index=0)]
-            print(f"Image-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
-        elif prompt:
-            print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
-        else:
-            return {"error": "Provide 'image', 'prompt', or both."}
+            # Resize maintaining aspect ratio within max area
+            max_area = height * width
+            aspect_ratio = image.height / image.width
+            mod_value = i2v_pipe.vae_scale_factor_spatial * i2v_pipe.transformer.config.patch_size[1]
+            calc_height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
+            calc_width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
+            image = image.resize((calc_width, calc_height))
 
-        # Step 1: Generate at lower resolution
-        downscale_factor = 2 / 3
-        downscaled_height = int(height * downscale_factor)
-        downscaled_width = int(width * downscale_factor)
-        downscaled_height, downscaled_width = round_to_nearest_resolution(downscaled_height, downscaled_width)
-
-        latents = pipe(
-            conditions=conditions if conditions else None,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=downscaled_width,
-            height=downscaled_height,
-            num_frames=num_frames,
-            num_inference_steps=num_steps,
-            guidance_scale=guidance_scale,
-            decode_timestep=0.05,
-            image_cond_noise_scale=0.025,
-            generator=generator,
-            output_type="latent",
-        ).frames
-
-        if upscale:
-            # Step 2: Upscale latents 2x
-            upscaled_latents = pipe_upsample(
-                latents=latents,
-                output_type="latent",
-            ).frames
-
-            # Step 3: Denoise upscaled video
-            upscaled_height, upscaled_width = downscaled_height * 2, downscaled_width * 2
-            video = pipe(
-                conditions=conditions if conditions else None,
+            print(f"Image-to-video: {num_frames} frames @ {fps}fps, {calc_width}x{calc_height}")
+            output = i2v_pipe(
+                image=image,
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                width=upscaled_width,
-                height=upscaled_height,
-                num_frames=num_frames,
-                denoise_strength=denoise_strength,
-                num_inference_steps=10,
-                latents=upscaled_latents,
-                decode_timestep=0.05,
-                image_cond_noise_scale=0.025,
-                generator=generator,
-                output_type="pil",
-            ).frames[0]
-
-            # Step 4: Resize to expected resolution
-            video = [frame.resize((width, height)) for frame in video]
-        else:
-            video = pipe(
-                conditions=conditions if conditions else None,
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                width=downscaled_width,
-                height=downscaled_height,
+                height=calc_height,
+                width=calc_width,
                 num_frames=num_frames,
                 num_inference_steps=num_steps,
                 guidance_scale=guidance_scale,
-                decode_timestep=0.05,
-                image_cond_noise_scale=0.025,
                 generator=generator,
-                output_type="pil",
             ).frames[0]
+        elif prompt:
+            print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
+            output = t2v_pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                height=height,
+                width=width,
+                num_frames=num_frames,
+                num_inference_steps=num_steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+            ).frames[0]
+        else:
+            return {"error": "Provide 'image', 'prompt', or both."}
 
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp_path = tmp.name
 
-        export_to_video(video, tmp_path, fps=fps)
+        export_to_video(output, tmp_path, fps=fps)
         video_b64 = video_to_base64(tmp_path)
         os.unlink(tmp_path)
 
