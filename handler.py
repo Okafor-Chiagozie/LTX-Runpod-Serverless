@@ -6,29 +6,57 @@ import os
 import requests
 from io import BytesIO
 from PIL import Image
+from huggingface_hub import hf_hub_download
 
-print("Loading LTX Video 13B 0.9.8 pipeline...")
+print("Loading LTX-2.3 22B pipeline...")
 
-from diffusers import LTXConditionPipeline, LTXLatentUpsamplePipeline
-from diffusers.pipelines.ltx.pipeline_ltx_condition import LTXVideoCondition
-from diffusers.utils import export_to_video, load_video
+from ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
+from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
+from ltx_core.components.guiders import MultiModalGuiderParams
+from ltx_core.components.conditioning import ImageConditioningInput
 
-MODEL_ID = "Lightricks/LTX-Video-0.9.8-13B-distilled"
-UPSCALER_ID = "Lightricks/ltxv-spatial-upscaler-0.9.7"
+# Download model files
+MODEL_DIR = "/app/models"
+os.makedirs(MODEL_DIR, exist_ok=True)
 
-print("Downloading/loading 13B model...")
-pipe = LTXConditionPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
-pipe_upsample = LTXLatentUpsamplePipeline.from_pretrained(UPSCALER_ID, vae=pipe.vae, torch_dtype=torch.bfloat16)
-pipe.to("cuda")
-pipe_upsample.to("cuda")
-pipe.vae.enable_tiling()
-print("13B pipeline loaded and ready.")
+REPO_ID = "Lightricks/LTX-2.3"
 
+def download_if_needed(filename):
+    local_path = os.path.join(MODEL_DIR, filename)
+    if not os.path.exists(local_path):
+        print(f"Downloading {filename}...")
+        hf_hub_download(REPO_ID, filename=filename, local_dir=MODEL_DIR)
+    return local_path
 
-def round_to_nearest_resolution(height, width):
-    height = height - (height % pipe.vae_spatial_compression_ratio)
-    width = width - (width % pipe.vae_spatial_compression_ratio)
-    return height, width
+checkpoint_path = download_if_needed("ltx-2.3-22b-distilled-1.1.safetensors")
+distilled_lora_path = download_if_needed("ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
+upsampler_path = download_if_needed("ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+
+# Download Gemma text encoder
+GEMMA_REPO = "google/gemma-3-4b-pt"
+gemma_dir = os.path.join(MODEL_DIR, "gemma")
+if not os.path.exists(gemma_dir):
+    print("Downloading Gemma text encoder...")
+    from huggingface_hub import snapshot_download
+    snapshot_download(GEMMA_REPO, local_dir=gemma_dir)
+
+print("Initializing pipeline...")
+distilled_lora = [
+    LoraPathStrengthAndSDOps(
+        distilled_lora_path,
+        0.6,
+        LTXV_LORA_COMFY_RENAMING_MAP,
+    ),
+]
+
+pipeline = TI2VidTwoStagesPipeline(
+    checkpoint_path=checkpoint_path,
+    distilled_lora=distilled_lora,
+    spatial_upsampler_path=upsampler_path,
+    gemma_root=gemma_dir,
+    loras=[],
+)
+print("LTX-2.3 pipeline loaded and ready.")
 
 
 def load_image_from_input(image_input):
@@ -52,100 +80,78 @@ def handler(job):
         inputs = job["input"]
 
         prompt          = inputs.get("prompt", "")
-        negative_prompt = inputs.get("negative_prompt", "worst quality, inconsistent motion, blurry, jittery, distorted")
-        num_frames      = inputs.get("num_frames", 97)
-        fps             = inputs.get("fps", 24)
-        width           = inputs.get("width", 832)
-        height          = inputs.get("height", 480)
-        num_steps       = inputs.get("num_inference_steps", 30)
-        guidance_scale  = inputs.get("guidance_scale", 5.0)
+        num_frames      = inputs.get("num_frames", 121)
+        fps             = inputs.get("fps", 25)
+        width           = inputs.get("width", 768)
+        height          = inputs.get("height", 512)
+        num_steps       = inputs.get("num_inference_steps", 40)
+        cfg_scale       = inputs.get("cfg_scale", 3.0)
+        stg_scale       = inputs.get("stg_scale", 1.0)
         seed            = inputs.get("seed", -1)
-        upscale         = inputs.get("upscale", True)
-        denoise_strength = inputs.get("denoise_strength", 0.4)
 
-        generator = None if seed == -1 else torch.Generator("cuda").manual_seed(seed)
+        if seed == -1:
+            seed = torch.randint(0, 2**32, (1,)).item()
+
+        video_guider_params = MultiModalGuiderParams(
+            cfg_scale=cfg_scale,
+            stg_scale=stg_scale,
+            rescale_scale=0.7,
+            modality_scale=3.0,
+            skip_step=0,
+            stg_blocks=[29],
+        )
+
+        audio_guider_params = MultiModalGuiderParams(
+            cfg_scale=7.0,
+            stg_scale=1.0,
+            rescale_scale=0.7,
+            modality_scale=3.0,
+            skip_step=0,
+            stg_blocks=[29],
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
 
         image_input = inputs.get("image")
-        conditions = []
+        images = []
 
         if image_input:
             image = load_image_from_input(image_input)
-            video_cond = load_video(export_to_video([image]))
-            conditions = [LTXVideoCondition(video=video_cond, frame_index=0)]
+            img_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            image.save(img_tmp.name)
+            images = [
+                ImageConditioningInput(
+                    img_tmp.name,
+                    frame_index=0,
+                    strength=1.0,
+                    crf=33,
+                )
+            ]
             print(f"Image-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
         elif prompt:
             print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
         else:
             return {"error": "Provide 'image', 'prompt', or both."}
 
-        # Step 1: Generate at lower resolution
-        downscale_factor = 2 / 3
-        downscaled_height = int(height * downscale_factor)
-        downscaled_width = int(width * downscale_factor)
-        downscaled_height, downscaled_width = round_to_nearest_resolution(downscaled_height, downscaled_width)
-
-        latents = pipe(
-            conditions=conditions if conditions else None,
+        pipeline(
             prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=downscaled_width,
-            height=downscaled_height,
+            output_path=tmp_path,
+            seed=seed,
+            height=height,
+            width=width,
             num_frames=num_frames,
+            frame_rate=float(fps),
             num_inference_steps=num_steps,
-            guidance_scale=guidance_scale,
-            decode_timestep=0.05,
-            image_cond_noise_scale=0.025,
-            generator=generator,
-            output_type="latent",
-        ).frames
+            video_guider_params=video_guider_params,
+            audio_guider_params=audio_guider_params,
+            images=images if images else None,
+        )
 
-        if upscale:
-            # Step 2: Upscale latents 2x
-            upscaled_latents = pipe_upsample(
-                latents=latents,
-                output_type="latent",
-            ).frames
+        # Clean up temp image
+        if image_input and os.path.exists(img_tmp.name):
+            os.unlink(img_tmp.name)
 
-            # Step 3: Denoise upscaled video
-            upscaled_height, upscaled_width = downscaled_height * 2, downscaled_width * 2
-            video = pipe(
-                conditions=conditions if conditions else None,
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                width=upscaled_width,
-                height=upscaled_height,
-                num_frames=num_frames,
-                denoise_strength=denoise_strength,
-                num_inference_steps=10,
-                latents=upscaled_latents,
-                decode_timestep=0.05,
-                image_cond_noise_scale=0.025,
-                generator=generator,
-                output_type="pil",
-            ).frames[0]
-
-            # Step 4: Resize to expected resolution
-            video = [frame.resize((width, height)) for frame in video]
-        else:
-            video = pipe(
-                conditions=conditions if conditions else None,
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                width=downscaled_width,
-                height=downscaled_height,
-                num_frames=num_frames,
-                num_inference_steps=num_steps,
-                guidance_scale=guidance_scale,
-                decode_timestep=0.05,
-                image_cond_noise_scale=0.025,
-                generator=generator,
-                output_type="pil",
-            ).frames[0]
-
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-            tmp_path = tmp.name
-
-        export_to_video(video, tmp_path, fps=fps)
         video_b64 = video_to_base64(tmp_path)
         os.unlink(tmp_path)
 
