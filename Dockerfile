@@ -16,7 +16,7 @@ ENV PYTHONPATH="/app/ltx2/packages/ltx-core/src:/app/ltx2/packages/ltx-pipelines
 
 # Install additional dependencies and force upgrade transformers for Gemma 3
 COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout=300 -r requirements.txt && pip install --no-cache-dir --upgrade "transformers>=4.51.0"
+RUN pip install --no-cache-dir --timeout=300 -r requirements.txt
 
 COPY handler.py .
 
