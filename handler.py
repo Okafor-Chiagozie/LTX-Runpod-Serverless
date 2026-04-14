@@ -13,21 +13,12 @@ from diffusers import LTXConditionPipeline, LTXLatentUpsamplePipeline
 from diffusers.pipelines.ltx.pipeline_ltx_condition import LTXVideoCondition
 from diffusers.utils import export_to_video, load_video
 
-MODEL_HF = "Lightricks/LTX-Video-0.9.8-13B-distilled"
-UPSCALER_HF = "Lightricks/ltxv-spatial-upscaler-0.9.7"
-MODEL_LOCAL = "/runpod-volume/ltx-13b-model"
-UPSCALER_LOCAL = "/runpod-volume/ltx-upscaler"
+MODEL_ID = "Lightricks/LTX-Video-0.9.8-13B-distilled"
+UPSCALER_ID = "Lightricks/ltxv-spatial-upscaler-0.9.7"
 
-# Download models to network volume if not already there
-if not os.path.exists(os.path.join(MODEL_LOCAL, "model_index.json")):
-    print("Downloading 13B model to network volume (first time only)...")
-    from huggingface_hub import snapshot_download
-    snapshot_download(MODEL_HF, local_dir=MODEL_LOCAL)
-    snapshot_download(UPSCALER_HF, local_dir=UPSCALER_LOCAL)
-    print("Download complete.")
-
-pipe = LTXConditionPipeline.from_pretrained(MODEL_LOCAL, torch_dtype=torch.bfloat16)
-pipe_upsample = LTXLatentUpsamplePipeline.from_pretrained(UPSCALER_LOCAL, vae=pipe.vae, torch_dtype=torch.bfloat16)
+print("Downloading/loading 13B model...")
+pipe = LTXConditionPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
+pipe_upsample = LTXLatentUpsamplePipeline.from_pretrained(UPSCALER_ID, vae=pipe.vae, torch_dtype=torch.bfloat16)
 pipe.to("cuda")
 pipe_upsample.to("cuda")
 pipe.vae.enable_tiling()
