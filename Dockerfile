@@ -9,15 +9,9 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv for package management
-RUN pip install uv
-
-# Clone LTX-2 repo and install
+# Clone LTX-2 repo and install packages
 RUN git clone https://github.com/Lightricks/LTX-2.git /app/ltx2
-WORKDIR /app/ltx2
-RUN uv sync --frozen || pip install -e packages/ltx-core -e packages/ltx-pipelines
-
-WORKDIR /app
+RUN pip install --no-cache-dir --timeout=300 -e /app/ltx2/packages/ltx-core -e /app/ltx2/packages/ltx-pipelines
 
 # Install additional dependencies
 COPY requirements.txt .
