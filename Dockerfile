@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y \
 
 # Clone LTX-2 repo and install packages
 RUN git clone https://github.com/Lightricks/LTX-2.git /app/ltx2
-RUN pip install --no-cache-dir --timeout=300 -e /app/ltx2/packages/ltx-core -e /app/ltx2/packages/ltx-pipelines
+RUN cd /app/ltx2 && pip install --no-cache-dir --timeout=300 -e packages/ltx-core && pip install --no-cache-dir --timeout=300 -e packages/ltx-pipelines
+ENV PYTHONPATH="/app/ltx2/packages/ltx-core/src:/app/ltx2/packages/ltx-pipelines/src:${PYTHONPATH}"
 
 # Install additional dependencies
 COPY requirements.txt .
