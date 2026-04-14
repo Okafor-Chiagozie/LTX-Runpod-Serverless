@@ -31,10 +31,11 @@ upsampler_path = download_if_needed("ltx-2.3-spatial-upscaler-x2-1.1.safetensors
 # Download Gemma text encoder
 GEMMA_REPO = "google/gemma-3-4b-pt"
 gemma_dir = os.path.join(MODEL_DIR, "gemma")
-if not os.path.exists(gemma_dir):
+tokenizer_path = os.path.join(gemma_dir, "tokenizer.model")
+if not os.path.exists(tokenizer_path):
     print("Downloading Gemma text encoder...")
     from huggingface_hub import snapshot_download
-    snapshot_download(GEMMA_REPO, local_dir=gemma_dir)
+    snapshot_download(GEMMA_REPO, local_dir=gemma_dir, ignore_patterns=["*.gguf"])
 
 print("Initializing pipeline...")
 distilled_lora = [
