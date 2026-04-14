@@ -3,9 +3,6 @@ import torch
 import base64
 import tempfile
 import os
-import requests
-from io import BytesIO
-from PIL import Image
 from huggingface_hub import hf_hub_download
 
 print("Loading LTX-2.3 22B pipeline...")
@@ -13,7 +10,6 @@ print("Loading LTX-2.3 22B pipeline...")
 from ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
 from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
 from ltx_core.components.guiders import MultiModalGuiderParams
-from ltx_core.components.conditioning import ImageConditioningInput
 
 # Download model files
 MODEL_DIR = "/app/models"
@@ -59,16 +55,6 @@ pipeline = TI2VidTwoStagesPipeline(
 print("LTX-2.3 pipeline loaded and ready.")
 
 
-def load_image_from_input(image_input):
-    if image_input.startswith("http://") or image_input.startswith("https://"):
-        response = requests.get(image_input, timeout=30)
-        return Image.open(BytesIO(response.content)).convert("RGB")
-    elif image_input.startswith("data:image"):
-        header, data = image_input.split(",", 1)
-        return Image.open(BytesIO(base64.b64decode(data))).convert("RGB")
-    else:
-        return Image.open(BytesIO(base64.b64decode(image_input))).convert("RGB")
-
 
 def video_to_base64(video_path):
     with open(video_path, "rb") as f:
@@ -113,26 +99,10 @@ def handler(job):
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp_path = tmp.name
 
-        image_input = inputs.get("image")
-        images = []
+        if not prompt:
+            return {"error": "Provide a 'prompt'."}
 
-        if image_input:
-            image = load_image_from_input(image_input)
-            img_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-            image.save(img_tmp.name)
-            images = [
-                ImageConditioningInput(
-                    img_tmp.name,
-                    frame_index=0,
-                    strength=1.0,
-                    crf=33,
-                )
-            ]
-            print(f"Image-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
-        elif prompt:
-            print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
-        else:
-            return {"error": "Provide 'image', 'prompt', or both."}
+        print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
 
         pipeline(
             prompt=prompt,
@@ -145,12 +115,7 @@ def handler(job):
             num_inference_steps=num_steps,
             video_guider_params=video_guider_params,
             audio_guider_params=audio_guider_params,
-            images=images if images else None,
         )
-
-        # Clean up temp image
-        if image_input and os.path.exists(img_tmp.name):
-            os.unlink(img_tmp.name)
 
         video_b64 = video_to_base64(tmp_path)
         os.unlink(tmp_path)
