@@ -1,5 +1,8 @@
 runpod==1.7.9
 huggingface_hub>=0.27.0
+transformers>=4.51.0
+accelerate>=0.34.0
+sentencepiece
 Pillow>=10.0.0
 requests
 imageio[ffmpeg]
