@@ -1,91 +1,94 @@
-# LTX-Video 2B Serverless on RunPod — Setup Guide
+# LTX-Video Serverless on RunPod — Setup Guide
 
 ## Overview
-RunPod serverless endpoint running LTX-Video 2B for text-to-video and image-to-video generation.
+RunPod serverless endpoints for AI video generation using LTX-Video models. Three model tiers available.
+
+## Model Tiers
+
+| Model | Branch | Parameters | GPU | Quality | Cost/sec |
+|---|---|---|---|---|---|
+| **2B** | `2b-model` | 2B | 24 GB PRO | Good | $0.00031/s |
+| **13B 0.9.8** | `main` | 13B | 80-96 GB | Better | $0.00076-0.00111/s |
+| **LTX-2.3** | `ltx-2.3` | 22B | 80+ GB | Best | TBD |
 
 ## Architecture
-- **Model**: LTX-Video 2B (from `Lightricks/LTX-Video` diffusers pipeline)
-- **Runtime**: RunPod Serverless
-- **Docker Image**: `collincity/ltx-serverless:v9`
-- **Base Image**: `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (PyTorch 2.8.0, CUDA 12.8.1)
-- **Network Volume**: `LTX_Production_Data` (50GB, EU-RO-1)
-- **Model Path**: `/runpod-volume/ltx-model/`
-- **GPU**: 24 GB PRO (RTX 4090) with sequential CPU offloading
-- **Endpoint ID**: `swrgif95vdcviz`
+- **GitHub Repo**: `Okafor-Chiagozie/LTX-Runpod-Serverless`
+- **Deploy Method**: RunPod deploys directly from GitHub (no Docker Hub needed)
+- **Model Storage**: Downloaded from HuggingFace on cold start (no network volume needed)
+- **Benefit**: GPUs available from ALL datacenters, not locked to one region
 
 ## Files
-- `handler.py` — RunPod serverless handler (text-to-video + image-to-video)
+- `handler.py` — RunPod serverless handler
 - `requirements.txt` — Python dependencies
-- `Dockerfile` — Container build config
-- `test_endpoint.py` — Local script to test the endpoint and download video
+- `Dockerfile` — Container build config (PyTorch 2.8.0, CUDA 12.8.1)
+- `test_endpoint.py` — Local script to test endpoint and download video
+- `.env` — Local API key (not committed to git)
 
 ---
 
-## Step-by-Step Setup
+## Setup Steps
 
-### 1. Download Model to RunPod Network Volume
+### 1. Create GitHub Repo
+Push code to GitHub. RunPod builds the Docker image automatically.
 
-1. Create a **50GB Network Volume** on RunPod (region: EU-RO-1)
-2. Deploy a temporary **GPU Pod** (cheapest available, e.g. RTX 2000 Ada)
-   - Template: **RunPod Pytorch 2.8.0**
-   - Attach the network volume
-3. Open **Jupyter Lab** terminal and run:
+### 2. Create RunPod Serverless Endpoint
+1. Go to RunPod > **Serverless** > **Deploy** > **Custom deployment** > **Deploy from GitHub**
+2. Connect GitHub account, select repo and branch
+3. Configure endpoint (see settings below)
+4. **Create endpoint** — RunPod builds automatically
 
-```bash
-pip install huggingface_hub hf-xet
+### 3. Configure Endpoint Settings
+
+#### 2B Model (`2b-model` branch)
+- **GPU**: 24 GB PRO
+- **Container disk**: 20 GB
+- **Max workers**: 3
+- **Active workers**: 0
+- **Idle timeout**: 120 sec
+- **Execution timeout**: 900 sec
+- **No network volume**
+
+#### 13B Model (`main` branch)
+- **GPU**: 80 GB + 96 GB (fallback)
+- **Container disk**: 60 GB
+- **Max workers**: 3
+- **Active workers**: 0
+- **Idle timeout**: 120 sec
+- **Execution timeout**: 1800 sec
+- **No network volume**
+
+### 4. Test Locally
+Create `.env` file:
+```
+RUNPOD_API_KEY=your_api_key_here
 ```
 
+Install dependencies:
 ```bash
-python -c "from huggingface_hub import snapshot_download; snapshot_download('Lightricks/LTX-Video', local_dir='/workspace/ltx-model', allow_patterns=['model_index.json', 'scheduler/*', 'text_encoder/*', 'tokenizer/*', 'transformer/*', 'vae/*'])"
+pip install requests python-dotenv
 ```
 
-4. **Terminate the pod** immediately after download completes (model stays on network volume)
-
-> **Note**: Only download essential files (~15GB), NOT the full repo (111GB). Use `allow_patterns` to filter.
-
-### 2. Build Docker Image (Local Machine)
-
+Run test:
 ```bash
-docker build -t collincity/ltx-serverless:v9 .
+python test_endpoint.py
 ```
 
-Build takes ~30-60 minutes on first run (downloads base image + pip packages).
-
-### 3. Push to Docker Hub
-
-```bash
-docker login
-docker push collincity/ltx-serverless:v9
-```
-
-### 4. Create RunPod Serverless Endpoint
-
-1. Go to RunPod > **Serverless** > **Get Started** > **Custom deployment** > **Deploy from Docker registry**
-2. Set container image: `collincity/ltx-serverless:v9`
-3. Click **Create endpoint**
-4. Configure:
-   - **GPU**: 24 GB PRO ($0.00031/s)
-   - **Max Workers**: 3
-   - **Active Workers**: 0
-   - **Idle Timeout**: 120 sec
-   - **Execution Timeout**: 900 sec
-5. Attach network volume: **Manage** > **Edit Endpoint** > **Advanced** > **Network Volumes** > select `LTX_Production_Data`
-6. Save
+Video saves as `output.mp4`.
 
 ---
 
 ## API Usage
 
-### Text-to-Video
+### 2B Model — Text-to-Video
 ```json
 {
   "input": {
-    "prompt": "A cat walking through a sunny garden with flowers, cinematic lighting, high quality",
+    "prompt": "A woman smiling in golden sunset light, cinematic",
     "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
-    "num_frames": 161,
+    "num_frames": 49,
     "fps": 24,
-    "width": 1024,
-    "height": 576,
+    "width": 768,
+    "height": 512,
     "num_inference_steps": 50,
     "decode_timestep": 0.03,
     "decode_noise_scale": 0.025
@@ -93,17 +96,17 @@ docker push collincity/ltx-serverless:v9
 }
 ```
 
-### Image-to-Video
+### 2B Model — Image-to-Video
 ```json
 {
   "input": {
     "image": "https://example.com/image.jpg",
     "prompt": "The scene comes to life with gentle motion",
     "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
-    "num_frames": 161,
+    "num_frames": 49,
     "fps": 24,
-    "width": 1024,
-    "height": 576,
+    "width": 768,
+    "height": 512,
     "num_inference_steps": 50,
     "decode_timestep": 0.03,
     "decode_noise_scale": 0.025
@@ -111,97 +114,106 @@ docker push collincity/ltx-serverless:v9
 }
 ```
 
-### Image + Text to Video
+### 13B Model — Text-to-Video (with upscaling)
 ```json
 {
   "input": {
-    "image": "<base64-encoded-image-or-url>",
-    "prompt": "A description of the desired video",
-    "num_frames": 161,
+    "prompt": "A woman smiling in golden sunset light, cinematic",
+    "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
+    "num_frames": 97,
     "fps": 24,
-    "width": 1024,
-    "height": 576,
-    "num_inference_steps": 50,
-    "decode_timestep": 0.03,
-    "decode_noise_scale": 0.025
+    "width": 832,
+    "height": 480,
+    "num_inference_steps": 30,
+    "guidance_scale": 5.0,
+    "upscale": true,
+    "denoise_strength": 0.4
   }
 }
 ```
 
-### Response
+### 13B Model — Quick Test (no upscaling)
 ```json
 {
-  "video_base64": "<base64-encoded-mp4>",
-  "format": "mp4",
-  "frames": 161,
-  "fps": 24,
-  "width": 1024,
-  "height": 576
+  "input": {
+    "prompt": "A woman smiling in golden sunset light, cinematic",
+    "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
+    "num_frames": 49,
+    "fps": 24,
+    "width": 832,
+    "height": 480,
+    "num_inference_steps": 30,
+    "upscale": false
+  }
 }
 ```
 
 ## Input Parameters
 
+### 2B Model
 | Parameter | Default | Description |
 |---|---|---|
 | `prompt` | `""` | Text description of desired video |
 | `image` | `null` | Image URL or base64 for image-to-video |
 | `negative_prompt` | `"worst quality, inconsistent motion, blurry, jittery, distorted"` | What to avoid |
-| `num_frames` | `161` | Number of frames (~6.7 sec at 24fps) |
+| `num_frames` | `49` | Number of frames (~2 sec at 24fps) |
 | `fps` | `24` | Frames per second |
-| `width` | `1024` | Video width (must be divisible by 32) |
-| `height` | `576` | Video height (must be divisible by 32) |
-| `num_inference_steps` | `50` | Denoising steps (higher = better quality, slower) |
-| `guidance_scale` | `3.0` | How closely to follow the prompt |
-| `decode_timestep` | `0.03` | VAE decode timestep (important for quality) |
-| `decode_noise_scale` | `0.025` | VAE decode noise scale (important for quality) |
+| `width` | `768` | Video width (divisible by 32) |
+| `height` | `512` | Video height (divisible by 32) |
+| `num_inference_steps` | `50` | Denoising steps |
+| `guidance_scale` | `3.0` | Prompt adherence |
+| `decode_timestep` | `0.03` | VAE decode timestep (critical for quality) |
+| `decode_noise_scale` | `0.025` | VAE decode noise (critical for quality) |
 | `seed` | `-1` | Random seed (-1 = random) |
 
-## Testing Locally
+### 13B Model
+| Parameter | Default | Description |
+|---|---|---|
+| `prompt` | `""` | Text description |
+| `image` | `null` | Image for image-to-video |
+| `negative_prompt` | `"worst quality, inconsistent motion, blurry, jittery, distorted"` | What to avoid |
+| `num_frames` | `97` | Number of frames (~4 sec at 24fps) |
+| `fps` | `24` | Frames per second |
+| `width` | `832` | Output width (divisible by 32) |
+| `height` | `480` | Output height (divisible by 32) |
+| `num_inference_steps` | `30` | Denoising steps |
+| `guidance_scale` | `5.0` | Prompt adherence |
+| `upscale` | `true` | Enable 3-step upscale pipeline |
+| `denoise_strength` | `0.4` | Upscale denoising strength |
+| `seed` | `-1` | Random seed (-1 = random) |
 
-Use `test_endpoint.py` to send a request and save the video as MP4:
+## Cold Start Times
+Models download from HuggingFace on each cold start:
+- **2B**: ~3-4 min (download + load)
+- **13B**: ~10-15 min (download + load)
 
-```bash
-python test_endpoint.py
-```
-
-Edit `API_KEY` and `ENDPOINT_ID` in the script before running.
+After cold start, worker stays warm for `idle_timeout` seconds. Batch your clips to avoid repeated cold starts.
 
 ## Cost Estimates
-- **35 clips of ~7 seconds**: ~$0.50-1.00 (2B model on 24GB PRO)
-- **Network volume**: $0.07/GB/month = ~$3.50/month for 50GB
-- **Idle cost**: $0.00 (scales to zero)
+- **2B — 35 clips**: ~$0.50-1.00 + one cold start (~$0.06)
+- **13B — 35 clips**: ~$2-4.00 + one cold start (~$0.50)
+- **No storage costs** (no network volume)
 
 ## Key Lessons / Troubleshooting
 
-### Quality is garbled/noisy
-You MUST include `decode_timestep=0.03` and `decode_noise_scale=0.025` in every request. Without these, the VAE produces garbage output.
+### Quality is garbled/noisy (2B model)
+You MUST include `decode_timestep=0.03` and `decode_noise_scale=0.025`. Without these, the VAE produces garbage.
 
-### CUDA out of memory on 24GB
-Use `enable_sequential_cpu_offload()` instead of `.to("cuda")`. This moves each layer to GPU one at a time during inference.
+### CUDA out of memory on 24GB (2B model)
+Use `enable_sequential_cpu_offload()`. Max recommended resolution: 768x512.
 
-### RTX 5090 not compatible
-PyTorch 2.4.0 doesn't support RTX 5090 (sm_120). Use base image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` with PyTorch 2.8.0.
+### Resolution must be divisible by 32
+Both width and height must be divisible by 32 (e.g., 768x512, 832x480).
 
-### diffusers import error with torch 2.4.0
-Latest diffusers is incompatible with PyTorch 2.4.0. Either pin `diffusers==0.32.2` or upgrade to PyTorch 2.8.0 base image.
+### Network volume locks you to one datacenter
+Don't use network volumes — download from HuggingFace instead. This gives access to GPUs in ALL datacenters.
 
-### Timeout downloading torch during build
-Add `--timeout=300` to pip install in Dockerfile.
+### RTX 5090 not compatible with PyTorch 2.4.0
+Use base image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (PyTorch 2.8.0).
 
-### Disk quota exceeded on network volume
-Check usage: `df -h /workspace && du -sh /workspace/*/`
-Delete unused folders to free space.
-
-### Model download shows 111GB
-You're downloading the entire repo. Use `allow_patterns` to filter to only essential files.
-
-### Network volume not showing in serverless config
-Create the endpoint first, then attach the volume via **Manage** > **Edit Endpoint** > **Advanced** > **Network Volumes**.
-
-## Docker Image Versions
-| Version | Status | Notes |
-|---|---|---|
-| v1-v4 | Deprecated | PyTorch 2.4.0, various import/OOM errors |
-| v5-v8 | Deprecated | Missing decode params, bad quality |
-| **v9** | **Current** | PyTorch 2.8.0, latest diffusers, correct decode params |
+## Docker Image Versions (legacy, before GitHub deploy)
+| Version | Notes |
+|---|---|
+| v1-v4 | PyTorch 2.4.0, various errors |
+| v5-v8 | Missing decode params, bad quality |
+| v9 | PyTorch 2.8.0, correct params (replaced by GitHub deploy) |
