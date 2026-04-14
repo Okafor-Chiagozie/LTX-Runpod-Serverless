@@ -1,0 +1,13 @@
+{
+  "input": {
+    "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/320px-Cat03.jpg",
+    "prompt": "A cat slowly turning its head and blinking, cinematic, high quality",
+    "num_frames": 97,
+    "fps": 24,
+    "width": 768,
+    "height": 512,
+    "num_inference_steps": 40,
+    "guidance_scale": 3.0,
+    "seed": 42
+  }
+}
