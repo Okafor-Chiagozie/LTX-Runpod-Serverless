@@ -9,15 +9,18 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone LTX-2 repo and install packages
-RUN git clone https://github.com/Lightricks/LTX-2.git /app/ltx2
-RUN cd /app/ltx2 && pip install --no-cache-dir --timeout=300 -e packages/ltx-core && pip install --no-cache-dir --timeout=300 -e packages/ltx-pipelines
-ENV PYTHONPATH="/app/ltx2/packages/ltx-core/src:/app/ltx2/packages/ltx-pipelines/src:${PYTHONPATH}"
+# Install uv
+RUN pip install uv
 
-# Install additional dependencies and force upgrade transformers for Gemma 3
-COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout=300 -r requirements.txt
+# Clone LTX-2 repo and install with exact pinned versions
+RUN git clone https://github.com/Lightricks/LTX-2.git /app/ltx2
+WORKDIR /app/ltx2
+RUN uv sync --frozen --no-dev
+WORKDIR /app
+
+# Install runpod and other deps into the uv venv
+RUN /app/ltx2/.venv/bin/pip install runpod==1.7.9 huggingface_hub>=0.27.0 imageio[ffmpeg] requests Pillow>=10.0.0
 
 COPY handler.py .
 
-CMD ["python", "-u", "handler.py"]
+CMD ["/app/ltx2/.venv/bin/python", "-u", "handler.py"]
