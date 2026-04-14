@@ -104,6 +104,8 @@ def handler(job):
 
         frames_iter, audio = pipeline(
             prompt=prompt,
+            negative_prompt="",
+            images=[],
             seed=seed,
             height=height,
             width=width,
