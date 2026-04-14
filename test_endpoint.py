@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_KEY = os.environ.get("RUNPOD_API_KEY")
-ENDPOINT_ID = "31wfpqxutli7sm"
+ENDPOINT_ID = "70nfpq27c08tfl"
 
 BASE_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}"
 HEADERS = {
@@ -18,15 +18,13 @@ HEADERS = {
 
 payload = {
     "input": {
-        "prompt": "A woman with long brown hair smiles warmly in golden sunset light, close-up portrait, cinematic",
-        "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
-        "num_frames": 49,
-        "fps": 24,
-        "width": 768,
-        "height": 512,
-        "num_inference_steps": 50,
-        "decode_timestep": 0.03,
-        "decode_noise_scale": 0.025,
+        "prompt": "A woman with long brown hair smiles warmly in golden sunset light, close-up portrait, cinematic, realistic",
+        "num_frames": 81,
+        "fps": 16,
+        "width": 832,
+        "height": 480,
+        "num_inference_steps": 30,
+        "guidance_scale": 5.0,
     }
 }
 

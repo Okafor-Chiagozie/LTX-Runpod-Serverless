@@ -17,20 +17,29 @@ from transformers import CLIPVisionModel
 T2V_MODEL = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
 I2V_MODEL = "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
 
-# Load text-to-video pipeline
+# Load text-to-video pipeline only at startup (lighter on VRAM)
 print("Loading text-to-video pipeline...")
 t2v_vae = AutoencoderKLWan.from_pretrained(T2V_MODEL, subfolder="vae", torch_dtype=torch.float32)
 t2v_pipe = WanPipeline.from_pretrained(T2V_MODEL, vae=t2v_vae, torch_dtype=torch.bfloat16)
 t2v_pipe.to("cuda")
 
-# Load image-to-video pipeline
-print("Loading image-to-video pipeline...")
-i2v_image_encoder = CLIPVisionModel.from_pretrained(I2V_MODEL, subfolder="image_encoder", torch_dtype=torch.float32)
-i2v_vae = AutoencoderKLWan.from_pretrained(I2V_MODEL, subfolder="vae", torch_dtype=torch.float32)
-i2v_pipe = WanImageToVideoPipeline.from_pretrained(I2V_MODEL, vae=i2v_vae, image_encoder=i2v_image_encoder, torch_dtype=torch.bfloat16)
-i2v_pipe.to("cuda")
+# Image-to-video pipeline loaded on demand to save VRAM
+i2v_pipe = None
 
-print("Wan2.1 pipelines loaded and ready.")
+def get_i2v_pipe():
+    global i2v_pipe
+    if i2v_pipe is None:
+        print("Loading image-to-video pipeline on demand...")
+        # Move t2v to CPU to free VRAM
+        t2v_pipe.to("cpu")
+        torch.cuda.empty_cache()
+        i2v_image_encoder = CLIPVisionModel.from_pretrained(I2V_MODEL, subfolder="image_encoder", torch_dtype=torch.float32)
+        i2v_vae = AutoencoderKLWan.from_pretrained(I2V_MODEL, subfolder="vae", torch_dtype=torch.float32)
+        i2v_pipe = WanImageToVideoPipeline.from_pretrained(I2V_MODEL, vae=i2v_vae, image_encoder=i2v_image_encoder, torch_dtype=torch.bfloat16)
+        i2v_pipe.to("cuda")
+    return i2v_pipe
+
+print("Wan2.1 text-to-video pipeline loaded and ready.")
 
 DEFAULT_NEGATIVE = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
 
@@ -70,17 +79,18 @@ def handler(job):
         image_input = inputs.get("image")
 
         if image_input:
+            pipe = get_i2v_pipe()
             image = load_image_from_input(image_input)
             # Resize maintaining aspect ratio within max area
             max_area = height * width
             aspect_ratio = image.height / image.width
-            mod_value = i2v_pipe.vae_scale_factor_spatial * i2v_pipe.transformer.config.patch_size[1]
+            mod_value = pipe.vae_scale_factor_spatial * pipe.transformer.config.patch_size[1]
             calc_height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
             calc_width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
             image = image.resize((calc_width, calc_height))
 
             print(f"Image-to-video: {num_frames} frames @ {fps}fps, {calc_width}x{calc_height}")
-            output = i2v_pipe(
+            output = pipe(
                 image=image,
                 prompt=prompt,
                 negative_prompt=negative_prompt,
