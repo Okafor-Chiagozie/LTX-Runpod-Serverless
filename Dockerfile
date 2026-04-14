@@ -14,9 +14,9 @@ RUN git clone https://github.com/Lightricks/LTX-2.git /app/ltx2
 RUN cd /app/ltx2 && pip install --no-cache-dir --timeout=300 -e packages/ltx-core && pip install --no-cache-dir --timeout=300 -e packages/ltx-pipelines
 ENV PYTHONPATH="/app/ltx2/packages/ltx-core/src:/app/ltx2/packages/ltx-pipelines/src:${PYTHONPATH}"
 
-# Install additional dependencies
+# Install additional dependencies and force upgrade transformers for Gemma 3
 COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout=300 -r requirements.txt
+RUN pip install --no-cache-dir --timeout=300 -r requirements.txt && pip install --no-cache-dir --upgrade "transformers>=4.51.0"
 
 COPY handler.py .
 
