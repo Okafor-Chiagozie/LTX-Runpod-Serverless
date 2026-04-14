@@ -97,17 +97,13 @@ def handler(job):
             stg_blocks=[29],
         )
 
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-            tmp_path = tmp.name
-
         if not prompt:
             return {"error": "Provide a 'prompt'."}
 
         print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
 
-        pipeline(
+        frames_iter, audio = pipeline(
             prompt=prompt,
-            output_path=tmp_path,
             seed=seed,
             height=height,
             width=width,
@@ -117,6 +113,17 @@ def handler(job):
             video_guider_params=video_guider_params,
             audio_guider_params=audio_guider_params,
         )
+
+        # Collect frames and encode to video
+        import imageio
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        writer = imageio.get_writer(tmp_path, fps=fps, codec="libx264")
+        for frame_tensor in frames_iter:
+            frame = (frame_tensor.clamp(0, 1) * 255).byte().cpu().permute(1, 2, 0).numpy()
+            writer.append_data(frame)
+        writer.close()
 
         video_b64 = video_to_base64(tmp_path)
         os.unlink(tmp_path)
