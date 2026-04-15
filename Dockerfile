@@ -19,8 +19,8 @@ RUN uv sync --frozen --no-dev
 WORKDIR /app
 
 # Install runpod and other deps into the uv venv
-RUN /app/ltx2/.venv/bin/pip install runpod==1.7.9 huggingface_hub>=0.27.0 imageio[ffmpeg] requests Pillow>=10.0.0
+RUN cd /app/ltx2 && uv pip install runpod==1.7.9 "huggingface_hub>=0.27.0" "imageio[ffmpeg]" requests "Pillow>=10.0.0"
 
 COPY handler.py .
 
-CMD ["/app/ltx2/.venv/bin/python", "-u", "handler.py"]
+CMD ["bash", "-c", "cd /app/ltx2 && uv run python -u /app/handler.py"]
