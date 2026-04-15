@@ -8,9 +8,9 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 from huggingface_hub import hf_hub_download
 
-print("Loading LTX-2.3 22B FP8 pipeline...")
+print("Loading LTX-2.3 22B FP8 single-stage pipeline...")
 
-from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
+from ltx_pipelines.ti2vid_one_stage import TI2VidOneStagePipeline
 from ltx_core.components.guiders import MultiModalGuiderParams
 from ltx_core.quantization import QuantizationPolicy
 
@@ -20,21 +20,14 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 
 REPO_ID = "Lightricks/LTX-2.3-fp8"
 
-def download_if_needed(filename):
+def download_if_needed(repo, filename):
     local_path = os.path.join(MODEL_DIR, filename)
     if not os.path.exists(local_path):
         print(f"Downloading {filename}...")
-        hf_hub_download(REPO_ID, filename=filename, local_dir=MODEL_DIR)
+        hf_hub_download(repo, filename=filename, local_dir=MODEL_DIR)
     return local_path
 
-checkpoint_path = download_if_needed("ltx-2.3-22b-distilled-fp8.safetensors")
-
-# Upsampler is in the main repo, not fp8
-upsampler_local = os.path.join(MODEL_DIR, "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
-if not os.path.exists(upsampler_local):
-    print("Downloading spatial upsampler...")
-    hf_hub_download("Lightricks/LTX-2.3", filename="ltx-2.3-spatial-upscaler-x2-1.1.safetensors", local_dir=MODEL_DIR)
-upsampler_path = upsampler_local
+checkpoint_path = download_if_needed(REPO_ID, "ltx-2.3-22b-distilled-fp8.safetensors")
 
 # Download Gemma text encoder
 GEMMA_REPO = "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized"
@@ -45,11 +38,9 @@ if not os.path.exists(gemma_config):
     from huggingface_hub import snapshot_download
     snapshot_download(GEMMA_REPO, local_dir=gemma_dir, ignore_patterns=["*.gguf"])
 
-print("Initializing pipeline with FP8 quantization...")
-pipeline = TI2VidTwoStagesPipeline(
+print("Initializing single-stage pipeline with FP8...")
+pipeline = TI2VidOneStagePipeline(
     checkpoint_path=checkpoint_path,
-    distilled_lora=[],
-    spatial_upsampler_path=upsampler_path,
     gemma_root=gemma_dir,
     loras=[],
     quantization=QuantizationPolicy.fp8_cast(),
@@ -67,13 +58,13 @@ def handler(job):
         inputs = job["input"]
 
         prompt          = inputs.get("prompt", "")
-        num_frames      = inputs.get("num_frames", 121)
+        num_frames      = inputs.get("num_frames", 81)
         fps             = inputs.get("fps", 25)
         width           = inputs.get("width", 768)
         height          = inputs.get("height", 512)
-        num_steps       = inputs.get("num_inference_steps", 40)
-        cfg_scale       = inputs.get("cfg_scale", 3.0)
-        stg_scale       = inputs.get("stg_scale", 1.0)
+        num_steps       = inputs.get("num_inference_steps", 8)
+        cfg_scale       = inputs.get("cfg_scale", 1.0)
+        stg_scale       = inputs.get("stg_scale", 0.0)
         seed            = inputs.get("seed", -1)
 
         if seed == -1:
@@ -116,7 +107,7 @@ def handler(job):
             audio_guider_params=audio_guider_params,
         )
 
-        # Encode video using LTX-2's native encoder
+        # Encode video
         from ltx_pipelines.utils.media_io import encode_video
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp_path = tmp.name
