@@ -24,16 +24,14 @@ with open("scene_10.png", "rb") as img_file:
 payload = {
     "input": {
         "image": image_b64,
-        "prompt": "Water bursts through doors, crew members shout and scramble, the camera follows the relentless surge of water overtaking the compartments.",
-        "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
+        "prompt": "Inside a flooding ship corridor, knee-deep murky water rising rapidly, crew members in naval uniforms desperately pulling ropes and bracing against the surge, dim warm overhead lights reflecting off the water surface, metal walls with round portholes, cinematic camera slowly tracking forward through the corridor, dramatic tension, photorealistic, 4K film quality",
+        "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted, static, low quality, deformed",
         "num_frames": 121,
         "fps": 24,
         "width": 1280,
         "height": 736,
-        "num_inference_steps": 50,
-        "guidance_scale": 3.5,
-        "upscale": True,
-        "denoise_strength": 0.5,
+        "num_inference_steps": 30,
+        "guidance_scale": 4.0,
     }
 }
 

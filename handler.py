@@ -8,9 +8,8 @@ from PIL import Image
 
 print("Loading LTX-2 19B pipeline...")
 
-from diffusers import LTX2Pipeline, FlowMatchEulerDiscreteScheduler
+from diffusers import LTX2Pipeline
 from diffusers.pipelines.ltx2.export_utils import encode_video
-from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES
 
 MODEL_ID = "Lightricks/LTX-2"
 device = "cuda:0"
@@ -19,15 +18,6 @@ device = "cuda:0"
 pipe = LTX2Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
 pipe.enable_model_cpu_offload(device=device)
 pipe.vae.enable_tiling()
-
-# Load distilled LoRA for fast 8-step inference
-pipe.load_lora_weights(MODEL_ID, adapter_name="distilled", weight_name="ltx-2-19b-distilled-lora-384.safetensors")
-pipe.set_adapters("distilled", 1.0)
-
-# Switch scheduler for distilled mode
-pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(
-    pipe.scheduler.config, use_dynamic_shifting=False, shift_terminal=None
-)
 
 # I2V pipeline loaded on demand
 i2v_pipe = None
@@ -68,8 +58,8 @@ def handler(job):
         fps = inputs.get("fps", 24)
         width = inputs.get("width", 1280)
         height = inputs.get("height", 736)
-        num_steps = inputs.get("num_inference_steps", 8)
-        guidance_scale = inputs.get("guidance_scale", 1.0)
+        num_steps = inputs.get("num_inference_steps", 30)
+        guidance_scale = inputs.get("guidance_scale", 4.0)
         seed = inputs.get("seed", -1)
         image_b64 = inputs.get("image", None)
 
@@ -93,7 +83,7 @@ def handler(job):
             extra_kwargs = {}
             print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
 
-        # Generate video (distilled: 8 steps with predefined sigmas)
+        # Generate video
         result = active_pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
@@ -102,7 +92,6 @@ def handler(job):
             num_frames=num_frames,
             frame_rate=float(fps),
             num_inference_steps=num_steps,
-            sigmas=DISTILLED_SIGMA_VALUES,
             guidance_scale=guidance_scale,
             generator=generator,
             output_type="np",
