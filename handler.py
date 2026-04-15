@@ -29,10 +29,10 @@ distilled_lora_path = download_if_needed("ltx-2.3-22b-distilled-lora-384-1.1.saf
 upsampler_path = download_if_needed("ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
 
 # Download Gemma text encoder
-GEMMA_REPO = "google/gemma-3-4b-pt"
+GEMMA_REPO = "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized"
 gemma_dir = os.path.join(MODEL_DIR, "gemma")
-tokenizer_path = os.path.join(gemma_dir, "tokenizer.model")
-if not os.path.exists(tokenizer_path):
+gemma_config = os.path.join(gemma_dir, "config.json")
+if not os.path.exists(gemma_config):
     print("Downloading Gemma text encoder...")
     from huggingface_hub import snapshot_download
     snapshot_download(GEMMA_REPO, local_dir=gemma_dir, ignore_patterns=["*.gguf"])
@@ -116,16 +116,19 @@ def handler(job):
             audio_guider_params=audio_guider_params,
         )
 
-        # Collect frames and encode to video
-        import imageio
+        # Collect frames and encode to video using the same method as LTX-2
+        # frames_iter yields tensors of shape (1, H, W, C) in uint8 [0, 255]
+        from ltx_pipelines.utils.media_io import encode_video
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp_path = tmp.name
 
-        writer = imageio.get_writer(tmp_path, fps=fps, codec="libx264")
-        for frame_tensor in frames_iter:
-            frame = (frame_tensor.clamp(0, 1) * 255).byte().cpu().permute(1, 2, 0).numpy()
-            writer.append_data(frame)
-        writer.close()
+        encode_video(
+            video=frames_iter,
+            fps=fps,
+            audio=audio,
+            output_path=tmp_path,
+            video_chunks_number=1,
+        )
 
         video_b64 = video_to_base64(tmp_path)
         os.unlink(tmp_path)
