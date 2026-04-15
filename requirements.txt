@@ -13,3 +13,5 @@ numpy
 requests
 soundfile
 av
+peft
+torchaudio
