@@ -19,7 +19,7 @@ RUN uv sync --frozen --no-dev
 WORKDIR /app
 
 # Install runpod and other deps into the uv venv
-RUN cd /app/ltx2 && uv pip install runpod==1.7.9 "huggingface_hub>=0.27.0" "imageio[ffmpeg]" requests "Pillow>=10.0.0"
+RUN cd /app/ltx2 && uv pip install runpod==1.7.9 "huggingface_hub>=0.27.0" "imageio[ffmpeg]" requests "Pillow>=10.0.0" hf_transfer
 
 COPY handler.py .
 
