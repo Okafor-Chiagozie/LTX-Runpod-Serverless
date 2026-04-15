@@ -8,7 +8,7 @@ from huggingface_hub import hf_hub_download
 print("Loading LTX-2.3 22B pipeline...")
 
 from ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
-from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
+from ltx_pipelines.ti2vid_one_stage import TI2VidOneStagePipeline
 from ltx_core.components.guiders import MultiModalGuiderParams
 
 # Download model files
@@ -26,7 +26,6 @@ def download_if_needed(filename):
 
 checkpoint_path = download_if_needed("ltx-2.3-22b-distilled-1.1.safetensors")
 distilled_lora_path = download_if_needed("ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
-upsampler_path = download_if_needed("ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
 
 # Download Gemma text encoder
 GEMMA_REPO = "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized"
@@ -46,12 +45,10 @@ distilled_lora = [
     ),
 ]
 
-pipeline = TI2VidTwoStagesPipeline(
+pipeline = TI2VidOneStagePipeline(
     checkpoint_path=checkpoint_path,
-    distilled_lora=distilled_lora,
-    spatial_upsampler_path=upsampler_path,
     gemma_root=gemma_dir,
-    loras=[],
+    loras=distilled_lora,
 )
 print("LTX-2.3 pipeline loaded and ready.")
 
