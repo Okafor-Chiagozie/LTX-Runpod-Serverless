@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_KEY = os.environ.get("RUNPOD_API_KEY")
-ENDPOINT_ID = "bb5uma2ue2kavt"
+ENDPOINT_ID = "01o3qnos7l4iqi"
 
 BASE_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}"
 HEADERS = {
