@@ -3,12 +3,16 @@ import torch
 import base64
 import tempfile
 import os
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 from huggingface_hub import hf_hub_download
 
-print("Loading LTX-2.3 22B pipeline...")
+print("Loading LTX-2.3 22B FP8 pipeline...")
 
 from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
 from ltx_core.components.guiders import MultiModalGuiderParams
+from ltx_core.quantization import QuantizationPolicy
 
 # Download model files
 MODEL_DIR = "/app/models"
@@ -41,13 +45,14 @@ if not os.path.exists(gemma_config):
     from huggingface_hub import snapshot_download
     snapshot_download(GEMMA_REPO, local_dir=gemma_dir, ignore_patterns=["*.gguf"])
 
-print("Initializing pipeline...")
+print("Initializing pipeline with FP8 quantization...")
 pipeline = TI2VidTwoStagesPipeline(
     checkpoint_path=checkpoint_path,
     distilled_lora=[],
     spatial_upsampler_path=upsampler_path,
     gemma_root=gemma_dir,
     loras=[],
+    quantization=QuantizationPolicy.fp8_cast(),
 )
 print("LTX-2.3 pipeline loaded and ready.")
 
