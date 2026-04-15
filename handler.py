@@ -17,12 +17,12 @@ from diffusers.pipelines.ltx2.export_utils import encode_video
 MODEL_ID = "Lightricks/LTX-2"
 device = "cuda:0"
 
-# Load text-to-video pipeline with CPU offload
+# Load text-to-video pipeline with CPU offload (shares cache with i2v)
 pipe = LTX2Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
 pipe.enable_sequential_cpu_offload(device=device)
 
-# Load image-to-video pipeline sharing components
-i2v_pipe = LTX2ImageToVideoPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
+# Create image-to-video pipeline sharing ALL components (no extra download)
+i2v_pipe = LTX2ImageToVideoPipeline(**pipe.components)
 i2v_pipe.enable_sequential_cpu_offload(device=device)
 
 # Load latent upsampler
