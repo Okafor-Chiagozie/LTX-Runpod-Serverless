@@ -3,43 +3,40 @@ import torch
 import base64
 import tempfile
 import os
-import requests
-from io import BytesIO
+import io
 from PIL import Image
 
-print("Loading LTX Video 13B 0.9.8 pipeline...")
+print("Loading LTX-2 19B pipeline...")
 
-from diffusers import LTXConditionPipeline, LTXLatentUpsamplePipeline
-from diffusers.pipelines.ltx.pipeline_ltx_condition import LTXVideoCondition
-from diffusers.utils import export_to_video, load_video
+from diffusers import FlowMatchEulerDiscreteScheduler, LTX2ImageToVideoPipeline
+from diffusers.pipelines.ltx2 import LTX2Pipeline, LTX2LatentUpsamplePipeline
+from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
+from diffusers.pipelines.ltx2.utils import STAGE_2_DISTILLED_SIGMA_VALUES
+from diffusers.pipelines.ltx2.export_utils import encode_video
 
-MODEL_ID = "Lightricks/LTX-Video-0.9.8-13B-distilled"
-UPSCALER_ID = "Lightricks/ltxv-spatial-upscaler-0.9.7"
+MODEL_ID = "Lightricks/LTX-2"
+device = "cuda:0"
 
-print("Downloading/loading 13B model...")
-pipe = LTXConditionPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
-pipe_upsample = LTXLatentUpsamplePipeline.from_pretrained(UPSCALER_ID, vae=pipe.vae, torch_dtype=torch.bfloat16)
-pipe.to("cuda")
-pipe_upsample.to("cuda")
-pipe.vae.enable_tiling()
-print("13B pipeline loaded and ready.")
+# Load text-to-video pipeline with CPU offload
+pipe = LTX2Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
+pipe.enable_sequential_cpu_offload(device=device)
 
+# Load image-to-video pipeline sharing components
+i2v_pipe = LTX2ImageToVideoPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
+i2v_pipe.enable_sequential_cpu_offload(device=device)
 
-def round_to_nearest_resolution(height, width):
-    height = height - (height % pipe.vae_spatial_compression_ratio)
-    width = width - (width % pipe.vae_spatial_compression_ratio)
-    return height, width
+# Load latent upsampler
+latent_upsampler = LTX2LatentUpsamplerModel.from_pretrained(
+    MODEL_ID, subfolder="latent_upsampler", torch_dtype=torch.bfloat16
+)
+upsample_pipe = LTX2LatentUpsamplePipeline(vae=pipe.vae, latent_upsampler=latent_upsampler)
+upsample_pipe.enable_model_cpu_offload(device=device)
 
+# Load distilled LoRA for stage 2
+pipe.load_lora_weights(MODEL_ID, adapter_name="stage_2_distilled", weight_name="ltx-2-19b-distilled-lora-384.safetensors")
+pipe.set_adapters("stage_2_distilled", 0.0)
 
-def load_image_from_input(image_input):
-    if image_input.startswith("http://") or image_input.startswith("https://"):
-        response = requests.get(image_input, timeout=30)
-        return Image.open(BytesIO(response.content)).convert("RGB")
-    elif image_input.startswith("data:image"):
-        header, data = image_input.split(",", 1)
-        return Image.open(BytesIO(base64.b64decode(data))).convert("RGB")
-    else:
-        return Image.open(BytesIO(base64.b64decode(image_input))).convert("RGB")
+print("LTX-2 pipeline loaded and ready.")
 
 
 def video_to_base64(video_path):
@@ -51,101 +48,129 @@ def handler(job):
     try:
         inputs = job["input"]
 
-        prompt          = inputs.get("prompt", "")
-        negative_prompt = inputs.get("negative_prompt", "worst quality, inconsistent motion, blurry, jittery, distorted")
-        num_frames      = inputs.get("num_frames", 97)
-        fps             = inputs.get("fps", 24)
-        width           = inputs.get("width", 832)
-        height          = inputs.get("height", 480)
-        num_steps       = inputs.get("num_inference_steps", 30)
-        guidance_scale  = inputs.get("guidance_scale", 5.0)
-        seed            = inputs.get("seed", -1)
-        upscale         = inputs.get("upscale", True)
-        denoise_strength = inputs.get("denoise_strength", 0.4)
+        prompt = inputs.get("prompt", "")
+        negative_prompt = inputs.get("negative_prompt", "shaky, glitchy, low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts, fused fingers, bad anatomy, weird hand, ugly, transition, static.")
+        num_frames = inputs.get("num_frames", 121)
+        fps = inputs.get("fps", 24)
+        width = inputs.get("width", 768)
+        height = inputs.get("height", 512)
+        num_steps = inputs.get("num_inference_steps", 40)
+        guidance_scale = inputs.get("guidance_scale", 4.0)
+        seed = inputs.get("seed", -1)
+        upscale = inputs.get("upscale", True)
+        image_b64 = inputs.get("image", None)
 
-        generator = None if seed == -1 else torch.Generator("cuda").manual_seed(seed)
+        if not prompt:
+            return {"error": "Provide a 'prompt'."}
 
-        image_input = inputs.get("image")
-        conditions = []
+        if seed == -1:
+            seed = torch.randint(0, 2**32, (1,)).item()
+        generator = torch.Generator(device="cpu").manual_seed(seed)
 
-        if image_input:
-            image = load_image_from_input(image_input)
-            video_cond = load_video(export_to_video([image]))
-            conditions = [LTXVideoCondition(video=video_cond, frame_index=0)]
+        # Determine which pipeline to use
+        if image_b64:
+            image_bytes = base64.b64decode(image_b64)
+            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            image = image.resize((width, height))
+            active_pipe = i2v_pipe
+            extra_kwargs = {"image": image}
             print(f"Image-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
-        elif prompt:
-            print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
         else:
-            return {"error": "Provide 'image', 'prompt', or both."}
+            active_pipe = pipe
+            extra_kwargs = {}
+            print(f"Text-to-video: {num_frames} frames @ {fps}fps, {width}x{height}")
 
-        # Step 1: Generate at lower resolution
-        downscale_factor = 2 / 3
-        downscaled_height = int(height * downscale_factor)
-        downscaled_width = int(width * downscale_factor)
-        downscaled_height, downscaled_width = round_to_nearest_resolution(downscaled_height, downscaled_width)
+        # Stage 1: Generate latents
+        pipe.set_adapters("stage_2_distilled", 0.0)
 
-        latents = pipe(
-            conditions=conditions if conditions else None,
+        video_latent, audio_latent = active_pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
-            width=downscaled_width,
-            height=downscaled_height,
+            width=width,
+            height=height,
             num_frames=num_frames,
+            frame_rate=float(fps),
             num_inference_steps=num_steps,
             guidance_scale=guidance_scale,
-            decode_timestep=0.05,
-            image_cond_noise_scale=0.025,
             generator=generator,
             output_type="latent",
-        ).frames
+            return_dict=False,
+            **extra_kwargs,
+        )
 
         if upscale:
-            # Step 2: Upscale latents 2x
-            upscaled_latents = pipe_upsample(
-                latents=latents,
+            # Upscale latents 2x
+            upscaled_video_latent = upsample_pipe(
+                latents=video_latent,
                 output_type="latent",
-            ).frames
+                return_dict=False,
+            )[0]
 
-            # Step 3: Denoise upscaled video
-            upscaled_height, upscaled_width = downscaled_height * 2, downscaled_width * 2
-            video = pipe(
-                conditions=conditions if conditions else None,
+            # Stage 2: Refine with distilled LoRA
+            pipe.set_adapters("stage_2_distilled", 1.0)
+            pipe.vae.enable_tiling()
+
+            old_scheduler = pipe.scheduler
+            new_scheduler = FlowMatchEulerDiscreteScheduler.from_config(
+                pipe.scheduler.config, use_dynamic_shifting=False, shift_terminal=None
+            )
+            pipe.scheduler = new_scheduler
+
+            video, audio = pipe(
+                latents=upscaled_video_latent,
+                audio_latents=audio_latent,
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                width=upscaled_width,
-                height=upscaled_height,
-                num_frames=num_frames,
-                denoise_strength=denoise_strength,
-                num_inference_steps=10,
-                latents=upscaled_latents,
-                decode_timestep=0.05,
-                image_cond_noise_scale=0.025,
-                generator=generator,
-                output_type="pil",
-            ).frames[0]
+                num_inference_steps=3,
+                noise_scale=STAGE_2_DISTILLED_SIGMA_VALUES[0],
+                sigmas=STAGE_2_DISTILLED_SIGMA_VALUES,
+                guidance_scale=1.0,
+                output_type="np",
+                return_dict=False,
+            )
 
-            # Step 4: Resize to expected resolution
-            video = [frame.resize((width, height)) for frame in video]
+            pipe.scheduler = old_scheduler
         else:
-            video = pipe(
-                conditions=conditions if conditions else None,
+            # No upscale - generate directly
+            pipe.vae.enable_tiling()
+            video, audio = active_pipe(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                width=downscaled_width,
-                height=downscaled_height,
+                width=width,
+                height=height,
                 num_frames=num_frames,
+                frame_rate=float(fps),
                 num_inference_steps=num_steps,
                 guidance_scale=guidance_scale,
-                decode_timestep=0.05,
-                image_cond_noise_scale=0.025,
                 generator=generator,
-                output_type="pil",
-            ).frames[0]
+                output_type="np",
+                return_dict=False,
+                **extra_kwargs,
+            )
 
+        # Save video
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp_path = tmp.name
 
-        export_to_video(video, tmp_path, fps=fps)
+        audio_data = None
+        audio_sr = None
+        if audio is not None:
+            try:
+                a = audio[0] if isinstance(audio, (list, tuple)) else audio
+                audio_data = a.float().cpu() if hasattr(a, 'cpu') else None
+                audio_sr = pipe.vocoder.config.output_sampling_rate
+            except Exception:
+                pass
+
+        v = video[0] if isinstance(video, (list, tuple)) else video
+        encode_video(
+            v,
+            fps=fps,
+            audio=audio_data,
+            audio_sample_rate=audio_sr,
+            output_path=tmp_path,
+        )
+
         video_b64 = video_to_base64(tmp_path)
         os.unlink(tmp_path)
 
@@ -159,7 +184,8 @@ def handler(job):
         }
 
     except Exception as e:
-        return {"error": str(e)}
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 runpod.serverless.start({"handler": handler})

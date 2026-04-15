@@ -1,8 +1,9 @@
 runpod==1.7.9
-diffusers>=0.33.0
-transformers>=4.47.0
+git+https://github.com/huggingface/diffusers.git
+transformers>=4.52.0
 accelerate>=0.34.0
 huggingface_hub>=0.27.0
+hf_transfer
 sentencepiece
 protobuf
 opencv-python-headless
@@ -10,3 +11,4 @@ imageio[ffmpeg]
 Pillow>=10.0.0
 numpy
 requests
+soundfile
