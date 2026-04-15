@@ -18,13 +18,13 @@ HEADERS = {
 
 # Load image as base64
 import base64 as b64module
-with open("scene_08.png", "rb") as img_file:
+with open("scene_10.png", "rb") as img_file:
     image_b64 = b64module.b64encode(img_file.read()).decode("utf-8")
 
 payload = {
     "input": {
         "image": image_b64,
-        "prompt": "Smoke billows upward, flames crackling, a distant siren wailing. Camera drifts across the scene, capturing the chaotic aftermath.",
+        "prompt": "Water bursts through doors, crew members shout and scramble, the camera follows the relentless surge of water overtaking the compartments.",
         "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",
         "num_frames": 121,
         "fps": 24,
