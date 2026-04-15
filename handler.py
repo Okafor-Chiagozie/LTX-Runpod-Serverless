@@ -16,7 +16,7 @@ device = "cuda:0"
 
 # Load text-to-video pipeline with CPU offload
 pipe = LTX2Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
-pipe.enable_sequential_cpu_offload(device=device)
+pipe.enable_model_cpu_offload(device=device)
 pipe.vae.enable_tiling()
 
 # I2V pipeline loaded on demand
@@ -38,7 +38,7 @@ def get_i2v_pipe():
             vae=pipe.vae,
             scheduler=pipe.scheduler,
         )
-        i2v_pipe.enable_sequential_cpu_offload(device=device)
+        i2v_pipe.enable_model_cpu_offload(device=device)
         i2v_pipe.vae.enable_tiling()
     return i2v_pipe
 
@@ -117,6 +117,9 @@ def handler(job):
                 pass
 
         v = video[0] if isinstance(video, (list, tuple)) else video
+        # Remove batch dimension if present (5D -> 4D)
+        if hasattr(v, 'ndim') and v.ndim == 5:
+            v = v[0]
         encode_video(
             v,
             fps=fps,
